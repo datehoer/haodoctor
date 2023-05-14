@@ -45,22 +45,64 @@ class HaodoctorSpider(scrapy.Spider):
 
     def parse_detail(self, response):
         # 解析每个问诊的详情，获取所有回答的url
+        # https://www.haodf.com/bingcheng/8892450147.html 该信息为患者隐私，无法查看
+        err_msg = response.css('.error-msg::text').get()
+        if err_msg:
+            return
         info = {}
         pattern = re.compile(r'(.*?):[\n\s]*(.*?)\((.*?)\)')
         department_name = response.meta['department_name']
         question_title = response.css('h1::text').extract_first()
-        disease_info = response.css(".diseaseinfo *::text").extract()
-        disease = "".join(disease_info).strip()
-        results = pattern.findall(disease)
-        for category, content, date in results:
-            if category not in info:
-                info[category] = content
-            else:
-                if category == '疾病描述':
-                    if '疾病描述' not in info:
-                        info['疾病描述'] = []
-                    info['疾病描述'].append(content)
+        disease_info = response.css(".diseaseinfo")
+        disease_title = disease_info.css(".info3-title ::text").getall()
+        disease_content1 = disease_info.css(".info3-value ::text").getall()
+        disease_content2 = disease_info.css(".info3-title + .info3-value::text").getall()
+        disease_content = []
+        if len(disease_content1) != len(disease_content2):
+            i = 0
+            h = 0
+            while len(disease_content2) != len(disease_content1):
+                if disease_content2[i] == disease_content1[i]:
+                    disease_content.append(disease_content2[i])
+                    i = i + 1
+                    h = i
                 else:
-                    info[category] += ';' + content
-        suggestions = response.css(".suggestions.marginLeft0 *::text").extract()
-        suggestion = "".join(suggestions).strip()
+                    if h == i:
+                        h = h - 1
+                    disease_content[h] = disease_content[h] + disease_content1[i]
+                    del disease_content1[i]
+                    if len(disease_content2) == len(disease_content1):
+                        disease_content.append(disease_content2[i])
+        disease = {}
+        for i in range(len(disease_title)):
+            disease[disease_title[i]] = disease_content[i]
+        suggestions = response.css('.suggestions-text.paddingLeft20')
+        suggestion = {}
+        for sug in suggestions:
+            suggestion_title = sug.css('curr-head-wrap *::text').getall()
+            suggestion_title = "".join(suggestion_title).replace('\n', '').replace('\t', '').replace('\r', '')
+            suggestion_content = sug.css('.suggestions-content *::text').getall()
+            suggestion_content = "".join(suggestion_content).replace('\n', '').replace('\t', '').replace('\r', '').strip()
+            suggestion[suggestion_title] = suggestion_content
+        doctor_name = response.css(".info-text-name ::text").get()
+        doctor_duties = response.css(".info-text-grade ::text").get()
+        doctor_hospital = response.css(".info-text-faculty a *::text").getall()
+        doctor_hospital = "".join(doctor_hospital).replace('\n', '').replace('\t', '').replace('\r', '').strip()
+        doctor_good_at = response.css(".doctor-card-speciality div ::text").get().replace('\n', '').replace('\t', '').replace('\r', '').strip()
+        # 患者投票以及在线问诊量
+        doctor_count = response.css(".doctor-card-service .item-detail::text").getall()
+        doctor_vote = doctor_count[0].replace('\n', '').replace('\t', '').replace('\r', '').strip()
+        doctor_online = doctor_count[1].replace('\n', '').replace('\t', '').replace('\r', '').strip()
+        info['disease'] = disease
+        info['suggestion'] = suggestion
+        info['department_name'] = department_name
+        info['question_title'] = question_title
+        doctor = {}
+        doctor['doctor_name'] = doctor_name
+        doctor['doctor_duties'] = doctor_duties
+        doctor['doctor_hospital'] = doctor_hospital
+        doctor['doctor_good_at'] = doctor_good_at
+        doctor['doctor_vote'] = doctor_vote
+        doctor['doctor_online'] = doctor_online
+        info['doctor'] = doctor
+        yield info
